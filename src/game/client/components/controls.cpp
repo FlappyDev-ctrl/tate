@@ -1,6 +1,7 @@
 /* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include <base/math.h>
+#include <algorithm>
 
 #include <engine/client.h>
 #include <engine/shared/config.h>
@@ -10,11 +11,21 @@
 #include <game/client/components/menus.h>
 #include <game/client/components/scoreboard.h>
 #include <game/client/gameclient.h>
+#include <game/client/prediction/entities/character.h>
+#include <game/client/prediction/gameworld.h>
 #include <game/collision.h>
 
 #include <base/vmath.h>
 
 #include "controls.h"
+
+namespace
+{
+constexpr int DEFAULT_AVOID_DELAY = 500;
+}
+
+int64_t CControls::s_LastAvoidTime = 0;
+int64_t CControls::s_LastActiveCheckTime = 0;
 
 CControls::CControls()
 {
@@ -22,6 +33,7 @@ CControls::CControls()
 	mem_zero(m_aMousePos, sizeof(m_aMousePos));
 	mem_zero(m_aMousePosOnAction, sizeof(m_aMousePosOnAction));
 	mem_zero(m_aTargetPos, sizeof(m_aTargetPos));
+	mem_zero(m_aLastMousePos, sizeof(m_aLastMousePos));
 }
 
 void CControls::OnReset()
@@ -33,6 +45,8 @@ void CControls::OnReset()
 		AmmoCount = 0;
 
 	m_LastSendTime = 0;
+
+	mem_zero(m_aLastMousePos, sizeof(m_aLastMousePos));
 }
 
 void CControls::ResetInput(int Dummy)
@@ -54,6 +68,180 @@ void CControls::OnPlayerDeath()
 	for(int &AmmoCount : m_aAmmoCount)
 		AmmoCount = 0;
 }
+
+void CControls::AvoidFreeze()
+{
+	if(!g_Config.m_ClAvoidFreeze)
+		return;
+
+	const int LocalPlayerId = g_Config.m_ClDummy;
+	if(LocalPlayerId < 0 || LocalPlayerId >= NUM_DUMMIES)
+		return;
+
+	if(GameClient()->m_aLocalIds[LocalPlayerId] < 0)
+		return;
+
+	const int64_t CurrentTime = time_get();
+	if(!IsAvoidCooldownElapsed(CurrentTime))
+		return;
+
+	if(!IsPlayerActive(LocalPlayerId))
+		return;
+
+	if(!IsPlayerInDanger(LocalPlayerId))
+		return;
+
+	const int CheckTicks = maximum(1, g_Config.m_ClAvoidFreezeCheck);
+	if(PredictFreeze(m_aInputData[LocalPlayerId], CheckTicks, LocalPlayerId) && TryAvoidFreeze(LocalPlayerId))
+	{
+		UpdateAvoidCooldown(CurrentTime);
+	}
+}
+
+bool CControls::IsPlayerInDanger(int LocalPlayerId) const
+{
+	return PredictFreeze(m_aInputData[LocalPlayerId], 1, LocalPlayerId);
+}
+
+bool CControls::GetFreeze(vec2 Pos, int FreezeTime) const
+{
+	const int MapIndex = Collision()->GetPureMapIndex(Pos.x, Pos.y);
+
+	return FreezeTime > 0 || Collision()->IsTeleport(MapIndex) || Collision()->IsCheckEvilTeleport(MapIndex) || Collision()->IsCheckTeleport(MapIndex) || Collision()->IsEvilTeleport(MapIndex);
+}
+
+bool CControls::IsAvoidCooldownElapsed(int64_t CurrentTime) const
+{
+	const int64_t MinAvoidDelay = time_freq() * DEFAULT_AVOID_DELAY / 1000;
+	const int64_t ConfiguredDelay = maximum<int64_t>(0, (int64_t)g_Config.m_ClAvoidDelay * time_freq() / 1000);
+	return CurrentTime - s_LastAvoidTime >= maximum(ConfiguredDelay, MinAvoidDelay);
+}
+
+void CControls::UpdateAvoidCooldown(int64_t CurrentTime)
+{
+	s_LastAvoidTime = CurrentTime;
+}
+
+bool CControls::PredictFreeze(const CNetObj_PlayerInput &Input, int Ticks, int LocalPlayerId) const
+{
+	if(LocalPlayerId < 0 || LocalPlayerId >= NUM_DUMMIES)
+		return false;
+
+	if(!GameClient()->Predict())
+		return false;
+
+	const int LocalClientId = GameClient()->m_aLocalIds[LocalPlayerId];
+	if(LocalClientId < 0)
+		return false;
+
+	CGameWorld TempWorld;
+	TempWorld.CopyWorldClean(&GameClient()->m_PredictedWorld);
+
+	CCharacter *pChar = TempWorld.GetCharacterById(LocalClientId);
+	if(!pChar)
+		return false;
+
+	CNetObj_PlayerInput SimulatedInput = Input;
+	const int SimTicks = maximum(1, Ticks);
+	for(int i = 0; i < SimTicks; i++)
+	{
+		pChar->OnPredictedInput(&SimulatedInput);
+		TempWorld.Tick();
+	}
+
+	return GetFreeze(pChar->m_Pos, pChar->m_FreezeTime);
+}
+
+bool CControls::TryAvoidFreeze(int LocalPlayerId)
+{
+	const CNetObj_PlayerInput BaseInput = m_aInputData[LocalPlayerId];
+	const int CheckTicks = maximum(1, g_Config.m_ClAvoidFreezeCheck);
+	const int MaxAttempts = maximum(1, g_Config.m_ClMaxAvoidAttempts);
+	const int Directions[] = {0, -1, 1};
+	int Attempts = 0;
+
+	for(int Direction : Directions)
+	{
+		if(Attempts >= MaxAttempts)
+			break;
+
+		if(Direction == BaseInput.m_Direction)
+		{
+			Attempts++;
+			continue;
+		}
+
+		if(TryMove(BaseInput, Direction, CheckTicks, LocalPlayerId))
+			return true;
+
+		Attempts++;
+	}
+
+	return false;
+}
+
+bool CControls::TryMove(const CNetObj_PlayerInput &BaseInput, int Direction, int CheckTicks, int LocalPlayerId)
+{
+	CNetObj_PlayerInput ModifiedInput = BaseInput;
+	const int Sensitivity = maximum(1, g_Config.m_ClAvoidDirectionChangeSensitivity);
+
+	if(ModifiedInput.m_Direction != Direction)
+	{
+		if(Direction > ModifiedInput.m_Direction)
+			ModifiedInput.m_Direction = minimum(Direction, ModifiedInput.m_Direction + Sensitivity);
+		else
+			ModifiedInput.m_Direction = maximum(Direction, ModifiedInput.m_Direction - Sensitivity);
+	}
+
+	if(!PredictFreeze(ModifiedInput, CheckTicks, LocalPlayerId))
+	{
+		m_aInputData[LocalPlayerId].m_Direction = ModifiedInput.m_Direction;
+		return true;
+	}
+
+	return false;
+}
+
+bool CControls::IsPlayerActive(int LocalPlayerId)
+{
+	const int64_t ActiveCooldown = time_freq() / 20;
+	const int64_t CurrentTime = time_get();
+	if(CurrentTime - s_LastActiveCheckTime < ActiveCooldown)
+		return false;
+
+	s_LastActiveCheckTime = CurrentTime;
+
+	const CNetObj_PlayerInput &Input = m_aInputData[LocalPlayerId];
+	const bool MovementActive = Input.m_Direction != 0 || Input.m_Jump != 0;
+	const bool MouseActive = IsMouseMoved(LocalPlayerId);
+	return MovementActive || MouseActive;
+}
+
+bool CControls::IsMouseMoved(int LocalPlayerId)
+{
+	const bool HasMoved = m_aMousePos[LocalPlayerId] != m_aLastMousePos[LocalPlayerId];
+	m_aLastMousePos[LocalPlayerId] = m_aMousePos[LocalPlayerId];
+	return HasMoved;
+}
+
+void CControls::HookAssist()
+{
+	const int Local = g_Config.m_ClDummy;
+	if(!g_Config.m_ClHookAssist || !g_Config.m_ClAvoidFreeze)
+		return;
+
+	if(Local < 0 || Local >= NUM_DUMMIES)
+		return;
+
+	if(GameClient()->m_aLocalIds[Local] < 0)
+		return;
+
+	const int CheckTicks = maximum(1, g_Config.m_ClHookAssistCheck);
+	if(PredictFreeze(m_aInputData[Local], CheckTicks, Local))
+		m_aInputData[Local].m_Hook = 0;
+}
+
+
 
 struct CInputState
 {
@@ -261,6 +449,9 @@ int CControls::SnapInput(int *pData)
 			m_aInputData[g_Config.m_ClDummy].m_Direction = -1;
 		if(!m_aInputDirectionLeft[g_Config.m_ClDummy] && m_aInputDirectionRight[g_Config.m_ClDummy])
 			m_aInputData[g_Config.m_ClDummy].m_Direction = 1;
+
+		AvoidFreeze();
+		HookAssist();
 
 		// dummy copy moves
 		if(g_Config.m_ClDummyCopyMoves)

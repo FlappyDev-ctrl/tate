@@ -700,6 +700,13 @@ MACRO_CONFIG_STR(SvConnLoggingServer, sv_conn_logging_server, 128, "", CFGFLAG_S
 
 MACRO_CONFIG_INT(ClUnpredictedShadow, cl_unpredicted_shadow, 0, -1, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show unpredicted shadow tee (0 = off, 1 = on, -1 = don't even show in debug mode)")
 MACRO_CONFIG_INT(ClPredictFreeze, cl_predict_freeze, 1, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Predict freeze tiles (0 = off, 1 = on, 2 = partial (allow a small amount of movement in freeze)")
+MACRO_CONFIG_INT(ClAvoidFreeze, cl_avoid_freeze, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Automatically adjust movement to avoid freeze tiles")
+MACRO_CONFIG_INT(ClAvoidFreezeCheck, cl_avoid_freeze_check, 2, 1, 50, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Prediction ticks to check ahead when avoiding freezes")
+MACRO_CONFIG_INT(ClAvoidDelay, cl_avoid_delay, 500, 0, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Minimum delay in milliseconds between automatic freeze avoidance attempts")
+MACRO_CONFIG_INT(ClAvoidDirectionChangeSensitivity, cl_avoid_direction_change_sensitivity, 1, 1, 5, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Number of direction steps applied when adjusting course to avoid freezes")
+MACRO_CONFIG_INT(ClMaxAvoidAttempts, cl_max_avoid_attempts, 3, 1, 10, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Maximum direction changes tested when attempting to avoid freeze tiles")
+MACRO_CONFIG_INT(ClHookAssist, cl_hook_assist, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable hook when a predicted freeze would be hit")
+MACRO_CONFIG_INT(ClHookAssistCheck, cl_hook_assist_check, 2, 1, 50, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Prediction ticks to check ahead for hook freeze avoidance")
 MACRO_CONFIG_INT(ClShowNinja, cl_show_ninja, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show ninja skin")
 MACRO_CONFIG_INT(ClShowHookCollOther, cl_show_hook_coll_other, 1, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show other players' hook collision line (2 to always show)")
 MACRO_CONFIG_INT(ClShowHookCollOwn, cl_show_hook_coll_own, 1, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show own players' hook collision line (2 to always show)")

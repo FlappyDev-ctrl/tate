@@ -20,6 +20,7 @@ public:
 	vec2 m_aMousePos[NUM_DUMMIES];
 	vec2 m_aMousePosOnAction[NUM_DUMMIES];
 	vec2 m_aTargetPos[NUM_DUMMIES];
+	vec2 m_aLastMousePos[NUM_DUMMIES];
 
 	int m_aAmmoCount[NUM_WEAPONS];
 
@@ -52,5 +53,20 @@ private:
 	static void ConKeyInputCounter(IConsole::IResult *pResult, void *pUserData);
 	static void ConKeyInputSet(IConsole::IResult *pResult, void *pUserData);
 	static void ConKeyInputNextPrevWeapon(IConsole::IResult *pResult, void *pUserData);
+
+	void AvoidFreeze();
+	bool IsPlayerInDanger(int LocalPlayerId) const;
+	bool GetFreeze(vec2 Pos, int FreezeTime) const;
+	bool IsAvoidCooldownElapsed(int64_t CurrentTime) const;
+	void UpdateAvoidCooldown(int64_t CurrentTime);
+	bool PredictFreeze(const CNetObj_PlayerInput &Input, int Ticks, int LocalPlayerId) const;
+	bool TryAvoidFreeze(int LocalPlayerId);
+	bool TryMove(const CNetObj_PlayerInput &BaseInput, int Direction, int CheckTicks, int LocalPlayerId);
+	bool IsPlayerActive(int LocalPlayerId);
+	bool IsMouseMoved(int LocalPlayerId);
+	void HookAssist();
+
+	static int64_t s_LastAvoidTime;
+	static int64_t s_LastActiveCheckTime;
 };
 #endif
