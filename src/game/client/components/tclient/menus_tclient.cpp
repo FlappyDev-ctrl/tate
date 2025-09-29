@@ -523,13 +523,20 @@ void CMenus::RenderSettingsTClientSettngs(CUIRect MainView)
 	else
 		Column.HSplitTop(LineSize * 2, nullptr, &Column);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcUnpredOthersInFreeze, TCLocalize("Dont predict other players if you are frozen"), &g_Config.m_TcUnpredOthersInFreeze, &Column, LineSize);
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcPredMarginInFreeze, TCLocalize("Adjust your prediction margin while frozen"), &g_Config.m_TcPredMarginInFreeze, &Column, LineSize);
-	Column.HSplitTop(LineSize, &Button, &Column);
-	if(g_Config.m_TcPredMarginInFreeze)
-		Ui()->DoScrollbarOption(&g_Config.m_TcPredMarginInFreezeAmount, &g_Config.m_TcPredMarginInFreezeAmount, &Button, TCLocalize("Frozen Margin"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "ms");
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+        DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcPredMarginInFreeze, TCLocalize("Adjust your prediction margin while frozen"), &g_Config.m_TcPredMarginInFreeze, &Column, LineSize);
+        Column.HSplitTop(LineSize, &Button, &Column);
+        if(g_Config.m_TcPredMarginInFreeze)
+                Ui()->DoScrollbarOption(&g_Config.m_TcPredMarginInFreezeAmount, &g_Config.m_TcPredMarginInFreezeAmount, &Button, TCLocalize("Frozen Margin"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "ms");
+        DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAvoidFreeze, TCLocalize("Automatically back away from freeze tiles"), &g_Config.m_TcAvoidFreeze, &Column, LineSize);
+        if(g_Config.m_TcAvoidFreeze)
+        {
+                Column.HSplitTop(LineSize, &Button, &Column);
+                Ui()->DoScrollbarOption(&g_Config.m_TcAvoidFreezeRangeTiles, &g_Config.m_TcAvoidFreezeRangeTiles, &Button, TCLocalize("Freeze avoidance look-ahead"), 1, 8, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, TCLocalize(" tile(s)"));
+                DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAvoidFreezeReleaseHook, TCLocalize("Release hook when it grabs freeze"), &g_Config.m_TcAvoidFreezeReleaseHook, &Column, LineSize);
+        }
+        s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
 
-	// ***** Improved Anti Ping ***** //
+        // ***** Improved Anti Ping ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
 	s_SectionBoxes.push_back(Column);
 	Column.HSplitTop(HeadlineHeight, &Label, &Column);
