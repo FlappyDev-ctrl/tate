@@ -1,5 +1,8 @@
 /* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
+#include <algorithm>
+#include <array>
+
 #include <base/math.h>
 
 #include <engine/client.h>
@@ -11,6 +14,7 @@
 #include <game/client/components/scoreboard.h>
 #include <game/client/gameclient.h>
 #include <game/collision.h>
+#include <game/gamecore.h>
 #include <game/mapitems.h>
 
 #include <base/vmath.h>
@@ -41,27 +45,32 @@ bool IsFreezeAtPosition(const CCollision *pCollision, vec2 Pos)
         return IsFreezeTileAtMapPos(pCollision, MapX, MapY);
 }
 
-bool HasFreezeInDirection(const CCollision *pCollision, vec2 BasePos, int Direction)
+bool HasFreezeInDirection(const CCollision *pCollision, vec2 BasePos, int Direction, float Range)
 {
-        if(Direction == 0 || !pCollision)
+        if(Direction == 0 || !pCollision || Range <= 0.0f)
                 return false;
 
         const float PhysicalSize = CCharacterCore::PhysicalSize();
         const float HalfSize = PhysicalSize / 2.0f;
-        const float HorizontalOffsets[] = {HalfSize + 6.0f, HalfSize + 22.0f};
-        const float VerticalOffsets[] = {-HalfSize * 0.75f, 0.0f, HalfSize * 0.75f};
+        const float StartOffset = HalfSize + 6.0f;
+        const float MaxOffset = StartOffset + Range;
+        const float Step = std::max(8.0f, Range / 3.0f);
+        static constexpr std::array<float, 5> s_aVerticalFractions = {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f};
 
-        for(float Horizontal : HorizontalOffsets)
+        for(float Horizontal = StartOffset; Horizontal <= MaxOffset + 0.5f; Horizontal += Step)
         {
                 const vec2 HorizontalPos = BasePos + vec2(Direction * Horizontal, 0.0f);
-                for(float Vertical : VerticalOffsets)
+                for(float Fraction : s_aVerticalFractions)
                 {
-                        if(IsFreezeAtPosition(pCollision, HorizontalPos + vec2(0.0f, Vertical)))
+                        const vec2 SamplePos = HorizontalPos + vec2(0.0f, Fraction * HalfSize * 0.9f);
+                        if(IsFreezeAtPosition(pCollision, SamplePos))
                                 return true;
                 }
         }
 
-        return false;
+        // Ensure we always sample the farthest point even if the loop step skipped it.
+        const vec2 FarthestPos = BasePos + vec2(Direction * MaxOffset, 0.0f);
+        return IsFreezeAtPosition(pCollision, FarthestPos);
 }
 } // namespace
 
@@ -321,14 +330,38 @@ int CControls::SnapInput(int *pData)
                                 const vec2 BasePos = GameClient()->m_LocalCharacterPos;
                                 if(!IsFreezeAtPosition(pCollision, BasePos))
                                 {
-                                        const int DesiredDir = m_aInputData[g_Config.m_ClDummy].m_Direction;
-                                        if(DesiredDir != 0)
+                                        const float Range = g_Config.m_TcAvoidFreezeRangeTiles * 32.0f;
+                                        int DesiredDir = m_aInputData[g_Config.m_ClDummy].m_Direction;
+                                        int ApproachDir = DesiredDir;
+
+                                        if(ApproachDir == 0)
                                         {
-                                                const bool FreezeAhead = HasFreezeInDirection(pCollision, BasePos, DesiredDir);
+                                                const float HorizontalVelocity = LocalClient.m_Predicted.m_Vel.x;
+                                                if(absolute(HorizontalVelocity) > 1.0f)
+                                                {
+                                                        ApproachDir = HorizontalVelocity > 0.0f ? 1 : -1;
+                                                }
+                                                else if(LocalClient.m_Predicted.m_HookState == HOOK_GRABBED || LocalClient.m_Predicted.m_HookState == HOOK_FLYING)
+                                                {
+                                                        const float HookHorizontal = LocalClient.m_Predicted.m_HookPos.x - BasePos.x;
+                                                        if(absolute(HookHorizontal) > 4.0f)
+                                                                ApproachDir = HookHorizontal > 0.0f ? 1 : -1;
+                                                }
+                                        }
+
+                                        if(ApproachDir != 0)
+                                        {
+                                                const bool FreezeAhead = HasFreezeInDirection(pCollision, BasePos, ApproachDir, Range);
                                                 if(FreezeAhead)
                                                 {
-                                                        const bool FreezeBehind = HasFreezeInDirection(pCollision, BasePos, -DesiredDir);
-                                                        m_aInputData[g_Config.m_ClDummy].m_Direction = FreezeBehind ? 0 : -DesiredDir;
+                                                        const bool FreezeBehind = HasFreezeInDirection(pCollision, BasePos, -ApproachDir, Range);
+                                                        m_aInputData[g_Config.m_ClDummy].m_Direction = FreezeBehind ? 0 : -ApproachDir;
+
+                                                        if(g_Config.m_TcAvoidFreezeReleaseHook && LocalClient.m_Predicted.m_HookState == HOOK_GRABBED)
+                                                        {
+                                                                if(IsFreezeAtPosition(pCollision, LocalClient.m_Predicted.m_HookPos))
+                                                                        m_aInputData[g_Config.m_ClDummy].m_Hook = 0;
+                                                        }
                                                 }
                                         }
                                 }

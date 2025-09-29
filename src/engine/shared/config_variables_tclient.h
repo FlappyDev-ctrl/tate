@@ -46,6 +46,8 @@ MACRO_CONFIG_INT(TcPredMarginInFreeze, tc_pred_margin_in_freeze, 0, 0, 1, CFGFLA
 MACRO_CONFIG_INT(TcPredMarginInFreezeAmount, tc_pred_margin_in_freeze_amount, 15, 0, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Set what your prediction margin while frozen should be")
 
 MACRO_CONFIG_INT(TcAvoidFreeze, tc_avoid_freeze, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Automatically walk away from nearby freeze tiles")
+MACRO_CONFIG_INT(TcAvoidFreezeRangeTiles, tc_avoid_freeze_range_tiles, 2, 1, 8, CFGFLAG_CLIENT | CFGFLAG_SAVE, "How many tiles ahead to scan for freeze while auto-avoiding")
+MACRO_CONFIG_INT(TcAvoidFreezeReleaseHook, tc_avoid_freeze_release_hook, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Release hook automatically if it grabs a freeze tile while avoiding")
 
 MACRO_CONFIG_INT(TcShowOthersGhosts, tc_show_others_ghosts, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show ghosts for other players in their unpredicted position")
 MACRO_CONFIG_INT(TcSwapGhosts, tc_swap_ghosts, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show predicted players as ghost and normal players as unpredicted")
