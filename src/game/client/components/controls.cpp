@@ -2,6 +2,9 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include <base/math.h>
 
+#include <algorithm>
+#include <cmath>
+
 #include <engine/client.h>
 #include <engine/shared/config.h>
 
@@ -11,10 +14,41 @@
 #include <game/client/components/scoreboard.h>
 #include <game/client/gameclient.h>
 #include <game/collision.h>
+#include <game/mapitems.h>
 
 #include <base/vmath.h>
 
 #include "controls.h"
+
+namespace
+{
+bool IsFreezeTile(int Tile)
+{
+	return Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE;
+}
+
+bool IsFreezeTileAt(const CCollision *pCollision, const vec2 &Pos)
+{
+	if(!pCollision)
+		return false;
+	const int Index = pCollision->GetPureMapIndex(Pos);
+	if(Index < 0)
+		return false;
+	if(IsFreezeTile(pCollision->GetTileIndex(Index)))
+		return true;
+	return IsFreezeTile(pCollision->GetFrontTileIndex(Index));
+}
+
+float AngleBetween(const vec2 &a, const vec2 &b)
+{
+	const float LengthA = length(a);
+	const float LengthB = length(b);
+	if(LengthA < 1e-6f || LengthB < 1e-6f)
+		return 0.0f;
+	const float Dot = std::clamp(dot(a, b) / (LengthA * LengthB), -1.0f, 1.0f);
+	return std::acos(Dot);
+}
+} // namespace
 
 CControls::CControls()
 {
@@ -22,6 +56,9 @@ CControls::CControls()
 	mem_zero(m_aMousePos, sizeof(m_aMousePos));
 	mem_zero(m_aMousePosOnAction, sizeof(m_aMousePosOnAction));
 	mem_zero(m_aTargetPos, sizeof(m_aTargetPos));
+	mem_zero(m_aAvoidFreezeTimer, sizeof(m_aAvoidFreezeTimer));
+	mem_zero(m_aAvoidFreezeDir, sizeof(m_aAvoidFreezeDir));
+	mem_zero(m_aHookAssistLock, sizeof(m_aHookAssistLock));
 }
 
 void CControls::OnReset()
@@ -47,6 +84,9 @@ void CControls::ResetInput(int Dummy)
 
 	m_aInputDirectionLeft[Dummy] = 0;
 	m_aInputDirectionRight[Dummy] = 0;
+	m_aAvoidFreezeTimer[Dummy] = 0;
+	m_aAvoidFreezeDir[Dummy] = 0;
+	m_aHookAssistLock[Dummy] = false;
 }
 
 void CControls::OnPlayerDeath()
@@ -294,6 +334,131 @@ int CControls::SnapInput(int *pData)
 				pDummyInput->m_Fire++;
 
 			pDummyInput->m_Hook = g_Config.m_ClDummyHook;
+		}
+
+		const int Dummy = g_Config.m_ClDummy;
+		if(g_Config.m_ClAvoidFreeze && !GameClient()->m_Snap.m_SpecInfo.m_Active)
+		{
+			int &AvoidTimer = m_aAvoidFreezeTimer[Dummy];
+			int &AvoidDir = m_aAvoidFreezeDir[Dummy];
+			const int LocalId = GameClient()->m_Snap.m_LocalClientId;
+			if(LocalId >= 0 && GameClient()->m_aClients[LocalId].m_Active)
+			{
+				const CCharacterCore &LocalCore = GameClient()->m_aClients[LocalId].m_Predicted;
+				const bool HookingFreeze = LocalCore.m_HookState == HOOK_GRABBED && LocalCore.HookedPlayer() == -1 && IsFreezeTileAt(Collision(), LocalCore.m_HookPos);
+				if(HookingFreeze)
+				{
+					vec2 Avoid = LocalCore.m_Pos - LocalCore.m_HookPos;
+					int Dir = 0;
+					if(std::abs(Avoid.x) > 1.0f || std::abs(LocalCore.m_Vel.x) > 1.0f)
+					{
+						if(std::abs(Avoid.x) >= std::abs(Avoid.y) * 0.5f)
+							Dir = Avoid.x > 0.0f ? 1 : -1;
+						else if(std::abs(LocalCore.m_Vel.x) > 1.0f)
+							Dir = LocalCore.m_Vel.x > 0.0f ? 1 : -1;
+					}
+					if(Dir != 0)
+					{
+						AvoidDir = Dir;
+						const int Duration = std::max(1, g_Config.m_ClAvoidFreezeHold * Client()->GameTickSpeed() / 1000);
+						AvoidTimer = std::max(AvoidTimer, Duration);
+					}
+				}
+				if(AvoidTimer > 0 && AvoidDir != 0)
+				{
+					if(m_aInputDirectionLeft[Dummy] == 0 && m_aInputDirectionRight[Dummy] == 0)
+						m_aInputData[Dummy].m_Direction = AvoidDir;
+					if(--AvoidTimer <= 0)
+						AvoidDir = 0;
+				}
+			}
+			else
+			{
+				AvoidTimer = 0;
+				AvoidDir = 0;
+			}
+		}
+		else
+		{
+			m_aAvoidFreezeTimer[Dummy] = 0;
+			m_aAvoidFreezeDir[Dummy] = 0;
+		}
+
+		if(g_Config.m_ClHookAssist && !GameClient()->m_Snap.m_SpecInfo.m_Active)
+		{
+			const int LocalId = GameClient()->m_Snap.m_LocalClientId;
+			if(LocalId >= 0 && GameClient()->m_aClients[LocalId].m_Active)
+			{
+				const CGameClient::CClientData &LocalClient = GameClient()->m_aClients[LocalId];
+				if(!LocalClient.m_HookHitDisabled && !LocalClient.m_Solo)
+				{
+					const bool HookPressed = (m_aInputData[Dummy].m_Hook & 1) != 0;
+					if(!HookPressed)
+					{
+						m_aHookAssistLock[Dummy] = false;
+					}
+					else if(!m_aHookAssistLock[Dummy] && (m_aLastData[Dummy].m_Hook & 1) == 0)
+					{
+						vec2 Aim = vec2(m_aInputData[Dummy].m_TargetX, m_aInputData[Dummy].m_TargetY);
+						if(length(Aim) > 0.001f)
+						{
+							const float MaxDist = (float)g_Config.m_ClHookAssistMaxDist;
+							float BestAngle = (float)g_Config.m_ClHookAssistRange * pi / 180.0f;
+							float BestDist = MaxDist;
+							vec2 BestVec = vec2(0, 0);
+							bool FoundTarget = false;
+							const vec2 LocalPos = LocalClient.m_Predicted.m_Pos;
+							for(int i = 0; i < MAX_CLIENTS; ++i)
+							{
+								if(i == LocalId)
+									continue;
+								const CGameClient::CClientData &Client = GameClient()->m_aClients[i];
+								if(!Client.m_Active || Client.m_HookHitDisabled)
+									continue;
+								if(Client.m_Solo)
+									continue;
+								if(!GameClient()->m_Snap.m_aCharacters[i].m_Active)
+									continue;
+								vec2 ToTarget = Client.m_Predicted.m_Pos - LocalPos;
+								const float Dist = length(ToTarget);
+								if(Dist < 1.0f || Dist > MaxDist)
+									continue;
+								const float Angle = AngleBetween(Aim, ToTarget);
+								if(Angle > (float)g_Config.m_ClHookAssistRange * pi / 180.0f)
+									continue;
+								if(GameClient()->Collision()->IntersectLineTeleHook(LocalPos, Client.m_Predicted.m_Pos, nullptr, nullptr))
+									continue;
+								if(!FoundTarget || Angle < BestAngle || (std::abs(Angle - BestAngle) < 1e-3f && Dist < BestDist))
+								{
+									FoundTarget = true;
+									BestAngle = Angle;
+									BestDist = Dist;
+									BestVec = ToTarget;
+								}
+							}
+							if(FoundTarget && length(BestVec) > 0.001f)
+							{
+								const float MinDistance = GetMinMouseDistance();
+								const float MaxDistance = GetMaxMouseDistance();
+								float DesiredLength = std::clamp(length(BestVec), MinDistance, MaxDistance);
+								vec2 AimVec = normalize(BestVec) * DesiredLength;
+								m_aMousePos[Dummy] = AimVec;
+								m_aInputData[Dummy].m_TargetX = (int)AimVec.x;
+								m_aInputData[Dummy].m_TargetY = (int)AimVec.y;
+								m_aHookAssistLock[Dummy] = true;
+							}
+						}
+					}
+				}
+				else
+				{
+					m_aHookAssistLock[Dummy] = false;
+				}
+			}
+		}
+		else
+		{
+			m_aHookAssistLock[Dummy] = false;
 		}
 
 		// stress testing
