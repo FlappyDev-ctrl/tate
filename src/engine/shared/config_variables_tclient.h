@@ -41,6 +41,10 @@ MACRO_CONFIG_INT(TcRemoveAnti, tc_remove_anti, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG
 MACRO_CONFIG_INT(TcUnfreezeLagTicks, tc_remove_anti_ticks, 5, 0, 20, CFGFLAG_CLIENT | CFGFLAG_SAVE, "The biggest amount of prediction ticks that are removed")
 MACRO_CONFIG_INT(TcUnfreezeLagDelayTicks, tc_remove_anti_delay_ticks, 25, 5, 150, CFGFLAG_CLIENT | CFGFLAG_SAVE, "How many ticks it takes to remove the maximum prediction after being frozen")
 
+MACRO_CONFIG_INT(TcAutoHookAvoidFreeze, tc_auto_hook_avoid_freeze, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Automatically start hooking when freeze tiles are below you")
+MACRO_CONFIG_INT(TcAutoHookAvoidFreezeTiles, tc_auto_hook_avoid_freeze_tiles, 3, 1, 15, CFGFLAG_CLIENT | CFGFLAG_SAVE, "How many tiles below to scan for freeze when auto hooking")
+MACRO_CONFIG_INT(TcAutoHookAvoidFreezeVelocity, tc_auto_hook_avoid_freeze_velocity, 4, 0, 50, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Minimum downward speed required before auto hook triggers")
+
 MACRO_CONFIG_INT(TcUnpredOthersInFreeze, tc_unpred_others_in_freeze, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dont predict other players if you are frozen")
 MACRO_CONFIG_INT(TcPredMarginInFreeze, tc_pred_margin_in_freeze, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Enable changing prediction margin while frozen")
 MACRO_CONFIG_INT(TcPredMarginInFreezeAmount, tc_pred_margin_in_freeze_amount, 15, 0, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Set what your prediction margin while frozen should be")
@@ -72,6 +76,11 @@ MACRO_CONFIG_INT(TcColorFreezeFeet, tc_color_freeze_feet, 0, 0, 1, CFGFLAG_CLIEN
 // Revert Variables
 MACRO_CONFIG_INT(TcSmoothPredictionMargin, tc_prediction_margin_smooth, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Makes prediction margin transition smooth, causes worse ping jitter adjustment (reverts a DDNet change)")
 MACRO_CONFIG_INT(TcFreezeKatana, tc_frozen_katana, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show katana on frozen players (reverts a DDNet change)")
+
+MACRO_CONFIG_INT(TcHookAssist, tc_hook_assist, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Assist aiming towards hookable tiles when hooking")
+MACRO_CONFIG_INT(TcHookAssistMaxAngle, tc_hook_assist_max_angle, 45, 0, 180, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Maximum angle that hook assist can adjust within")
+MACRO_CONFIG_INT(TcHookAssistSamples, tc_hook_assist_samples, 12, 1, 64, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Number of hook assist samples to search through")
+MACRO_CONFIG_INT(TcHookAssistFullCircleAuto, tc_hook_assist_full_circle_auto, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Allow hook assist to search the full circle when auto hook triggers")
 
 // Outline Variables
 MACRO_CONFIG_INT(TcOutline, tc_outline, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Draws outlines")

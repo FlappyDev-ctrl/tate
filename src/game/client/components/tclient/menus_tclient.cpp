@@ -527,9 +527,42 @@ void CMenus::RenderSettingsTClientSettngs(CUIRect MainView)
 	Column.HSplitTop(LineSize, &Button, &Column);
 	if(g_Config.m_TcPredMarginInFreeze)
 		Ui()->DoScrollbarOption(&g_Config.m_TcPredMarginInFreezeAmount, &g_Config.m_TcPredMarginInFreezeAmount, &Button, TCLocalize("Frozen Margin"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "ms");
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+        s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
 
-	// ***** Improved Anti Ping ***** //
+        // ***** Hook Automation ***** //
+        Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
+        s_SectionBoxes.push_back(Column);
+        Column.HSplitTop(HeadlineHeight, &Label, &Column);
+        Ui()->DoLabel(&Label, TCLocalize("Hook Automation"), HeadlineFontSize, TEXTALIGN_ML);
+        Column.HSplitTop(MarginSmall, nullptr, &Column);
+
+        DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAutoHookAvoidFreeze, TCLocalize("Auto hook near freeze"), &g_Config.m_TcAutoHookAvoidFreeze, &Column, LineSize);
+        if(g_Config.m_TcAutoHookAvoidFreeze)
+        {
+                Column.HSplitTop(LineSize, &Button, &Column);
+                Ui()->DoScrollbarOption(&g_Config.m_TcAutoHookAvoidFreezeTiles, &g_Config.m_TcAutoHookAvoidFreezeTiles, &Button, TCLocalize("Scan distance"), 1, 15, &CUi::ms_LinearScrollbarScale, 0, TCLocalize(" tiles"));
+                Column.HSplitTop(LineSize, &Button, &Column);
+                Ui()->DoScrollbarOption(&g_Config.m_TcAutoHookAvoidFreezeVelocity, &g_Config.m_TcAutoHookAvoidFreezeVelocity, &Button, TCLocalize("Trigger fall speed"), 0, 50, &CUi::ms_LinearScrollbarScale, 0, TCLocalize(" uu/tick"));
+        }
+        else
+        {
+                Column.HSplitTop(LineSize * 2, nullptr, &Column);
+        }
+
+        Column.HSplitTop(MarginSmall, nullptr, &Column);
+        DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookAssist, TCLocalize("Hook assist"), &g_Config.m_TcHookAssist, &Column, LineSize);
+        if(g_Config.m_TcHookAssist)
+        {
+                Column.HSplitTop(LineSize, &Button, &Column);
+                Ui()->DoScrollbarOption(&g_Config.m_TcHookAssistMaxAngle, &g_Config.m_TcHookAssistMaxAngle, &Button, TCLocalize("Assist angle"), 0, 180, &CUi::ms_LinearScrollbarScale, 0, "°");
+                Column.HSplitTop(LineSize, &Button, &Column);
+                Ui()->DoScrollbarOption(&g_Config.m_TcHookAssistSamples, &g_Config.m_TcHookAssistSamples, &Button, TCLocalize("Assist samples"), 1, 64);
+                DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookAssistFullCircleAuto, TCLocalize("Full circle search during auto hook"), &g_Config.m_TcHookAssistFullCircleAuto, &Column, LineSize);
+        }
+        Column.HSplitTop(MarginExtraSmall, nullptr, &Column);
+        s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+
+        // ***** Improved Anti Ping ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
 	s_SectionBoxes.push_back(Column);
 	Column.HSplitTop(HeadlineHeight, &Label, &Column);

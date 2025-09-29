@@ -2,6 +2,8 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include <base/math.h>
 
+#include <algorithm>
+
 #include <engine/client.h>
 #include <engine/shared/config.h>
 
@@ -11,10 +13,109 @@
 #include <game/client/components/scoreboard.h>
 #include <game/client/gameclient.h>
 #include <game/collision.h>
+#include <game/gamecore.h>
+#include <game/mapitems.h>
 
 #include <base/vmath.h>
 
 #include "controls.h"
+
+namespace
+{
+bool IsFreezeTileIndex(int Index)
+{
+        return Index == TILE_FREEZE || Index == TILE_DFREEZE || Index == TILE_LFREEZE;
+}
+
+bool IsFreezeTileAt(const CCollision *pCollision, vec2 Pos)
+{
+        int MapIndex = pCollision->GetPureMapIndex(Pos);
+        if(MapIndex < 0)
+                return false;
+        return IsFreezeTileIndex(pCollision->GetTileIndex(MapIndex)) || IsFreezeTileIndex(pCollision->GetFrontTileIndex(MapIndex));
+}
+
+bool HasFreezeBelow(const CCollision *pCollision, vec2 Pos, int TilesToCheck)
+{
+        if(TilesToCheck <= 0)
+                return false;
+        const float HalfSize = CCharacterCore::PhysicalSize() * 0.5f;
+        const float Step = 32.0f;
+        for(int i = 0; i < TilesToCheck; ++i)
+        {
+                const float Offset = HalfSize + (i + 0.5f) * Step;
+                const float CheckY = Pos.y + Offset;
+                if(IsFreezeTileAt(pCollision, vec2(Pos.x, CheckY)) || IsFreezeTileAt(pCollision, vec2(Pos.x - HalfSize, CheckY)) || IsFreezeTileAt(pCollision, vec2(Pos.x + HalfSize, CheckY)))
+                {
+                        return true;
+                }
+        }
+        return false;
+}
+
+bool ShouldAutoHookAvoidFreeze(const CCollision *pCollision, const CCharacterCore &Char, int TilesToCheck, int VelocityThreshold)
+{
+        if(Char.m_Super || Char.m_HookHitDisabled || Char.m_IsInFreeze || Char.m_DeepFrozen)
+                return false;
+        if(Char.m_Vel.y < static_cast<float>(VelocityThreshold))
+                return false;
+        return HasFreezeBelow(pCollision, Char.m_Pos, TilesToCheck);
+}
+
+bool FindHookAssistDirection(const CCollision *pCollision, const CCharacterCore &Char, vec2 BaseDir, float SearchAngleRad, int Samples, bool AllowFullCircle, vec2 &OutDir)
+{
+        if(Samples <= 0)
+                return false;
+        const float HookLength = Char.m_Tuning.m_HookLength;
+        if(HookLength <= 0.0f)
+                return false;
+        if(length_squared(BaseDir) < 0.0001f)
+                BaseDir = vec2(0.0f, -1.0f);
+        BaseDir = normalize(BaseDir);
+        const float StepAngle = Samples > 0 ? SearchAngleRad / static_cast<float>(Samples) : 0.0f;
+        bool Found = false;
+        float BestScore = -1000.0f;
+        for(int i = -Samples; i <= Samples; ++i)
+        {
+                const float Angle = StepAngle * static_cast<float>(i);
+                vec2 Dir = rotate(BaseDir, Angle);
+                vec2 Hit, Before;
+                int HitType = pCollision->IntersectLineTeleHook(Char.m_Pos, Char.m_Pos + Dir * HookLength, &Hit, &Before, nullptr);
+                if(HitType == 0 || HitType == TILE_NOHOOK)
+                        continue;
+
+                const float Distance = distance(Hit, Char.m_Pos);
+                const float DistanceFactor = 1.0f - std::clamp(Distance / HookLength, 0.0f, 1.0f);
+                const float Alignment = std::clamp(dot(BaseDir, Dir), -1.0f, 1.0f);
+
+                float Score = AllowFullCircle ? DistanceFactor : Alignment * 0.7f + DistanceFactor * 0.3f;
+                if(!AllowFullCircle && Score <= 0.0f)
+                        continue;
+
+                if(Score > BestScore)
+                {
+                        BestScore = Score;
+                        OutDir = Dir;
+                        Found = true;
+                }
+        }
+        return Found;
+}
+
+void ApplyHookAssist(vec2 &MousePos, const CCollision *pCollision, const CCharacterCore &Char, int Samples, float SearchAngleRad, bool AllowFullCircle)
+{
+        vec2 Dir;
+        if(!FindHookAssistDirection(pCollision, Char, MousePos, SearchAngleRad, Samples, AllowFullCircle, Dir))
+                return;
+
+        float TargetLength = length(MousePos);
+        if(TargetLength < 0.001f)
+        {
+                TargetLength = Char.m_Tuning.m_HookLength;
+        }
+        MousePos = Dir * TargetLength;
+}
+} // namespace
 
 CControls::CControls()
 {
@@ -202,90 +303,112 @@ int CControls::SnapInput(int *pData)
 		for(auto &InputData : m_aInputData)
 			InputData.m_PlayerFlags &= ~PLAYERFLAG_CHATTING;
 
-	bool Send = m_aLastData[g_Config.m_ClDummy].m_PlayerFlags != m_aInputData[g_Config.m_ClDummy].m_PlayerFlags;
+        const int Dummy = g_Config.m_ClDummy;
+        bool Send = m_aLastData[Dummy].m_PlayerFlags != m_aInputData[Dummy].m_PlayerFlags;
 
-	m_aLastData[g_Config.m_ClDummy].m_PlayerFlags = m_aInputData[g_Config.m_ClDummy].m_PlayerFlags;
+        m_aLastData[Dummy].m_PlayerFlags = m_aInputData[Dummy].m_PlayerFlags;
 
-	// we freeze the input if chat or menu is activated
-	if(!(m_aInputData[g_Config.m_ClDummy].m_PlayerFlags & PLAYERFLAG_PLAYING))
-	{
-		if(!GameClient()->m_GameInfo.m_BugDDRaceInput)
-			ResetInput(g_Config.m_ClDummy);
+        bool AutoHookTriggered = false;
+        if((m_aInputData[Dummy].m_PlayerFlags & PLAYERFLAG_PLAYING) && GameClient()->m_Snap.m_pLocalCharacter && !GameClient()->m_Snap.m_SpecInfo.m_Active)
+        {
+                const CCharacterCore &PredictedChar = GameClient()->m_PredictedChar;
+                if(g_Config.m_TcAutoHookAvoidFreeze && ShouldAutoHookAvoidFreeze(Collision(), PredictedChar, g_Config.m_TcAutoHookAvoidFreezeTiles, g_Config.m_TcAutoHookAvoidFreezeVelocity))
+                {
+                        m_aInputData[Dummy].m_Hook = 1;
+                        AutoHookTriggered = true;
+                }
 
-		mem_copy(pData, &m_aInputData[g_Config.m_ClDummy], sizeof(m_aInputData[0]));
+                if(g_Config.m_TcHookAssist && (m_aInputData[Dummy].m_Hook || AutoHookTriggered))
+                {
+                        const bool AllowFullCircle = AutoHookTriggered && g_Config.m_TcHookAssistFullCircleAuto;
+                        float SearchAngleRad = AllowFullCircle ? pi : (g_Config.m_TcHookAssistMaxAngle / 180.0f) * pi;
+                        if(SearchAngleRad < 0.0f)
+                                SearchAngleRad = 0.0f;
+                        const int Samples = maximum(1, g_Config.m_TcHookAssistSamples);
+                        ApplyHookAssist(m_aMousePos[Dummy], Collision(), PredictedChar, Samples, SearchAngleRad, AllowFullCircle);
+                }
+        }
 
-		// set the target anyway though so that we can keep seeing our surroundings,
-		// even if chat or menu are activated
-		vec2 Pos = GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy];
-		if(g_Config.m_TcScaleMouseDistance && !GameClient()->m_Snap.m_SpecInfo.m_Active)
-		{
-			const int MaxDistance = g_Config.m_ClDyncam ? g_Config.m_ClDyncamMaxDistance : g_Config.m_ClMouseMaxDistance;
-			if(MaxDistance > 5 && MaxDistance < 1000) // Don't scale if angle bind or reduces precision
-				Pos *= 1000.0f / (float)MaxDistance;
-		}
-		m_aInputData[g_Config.m_ClDummy].m_TargetX = (int)Pos.x;
-		m_aInputData[g_Config.m_ClDummy].m_TargetY = (int)Pos.y;
+        // we freeze the input if chat or menu is activated
+        if(!(m_aInputData[Dummy].m_PlayerFlags & PLAYERFLAG_PLAYING))
+        {
+                if(!GameClient()->m_GameInfo.m_BugDDRaceInput)
+                        ResetInput(Dummy);
 
-		if(!m_aInputData[g_Config.m_ClDummy].m_TargetX && !m_aInputData[g_Config.m_ClDummy].m_TargetY)
-			m_aInputData[g_Config.m_ClDummy].m_TargetX = 1;
+                mem_copy(pData, &m_aInputData[Dummy], sizeof(m_aInputData[0]));
 
-		// send once a second just to be sure
-		Send = Send || time_get() > m_LastSendTime + time_freq();
-	}
-	else
-	{
-		vec2 Pos;
-		if(g_Config.m_ClSubTickAiming && m_aMousePosOnAction[g_Config.m_ClDummy] != vec2(0.0f, 0.0f))
-		{
-			Pos = GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy];
-			m_aMousePosOnAction[g_Config.m_ClDummy] = vec2(0.0f, 0.0f);
-		}
-		else
-			Pos = GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy];
+                // set the target anyway though so that we can keep seeing our surroundings,
+                // even if chat or menu are activated
+                vec2 Pos = GameClient()->m_Controls.m_aMousePos[Dummy];
+                if(g_Config.m_TcScaleMouseDistance && !GameClient()->m_Snap.m_SpecInfo.m_Active)
+                {
+                        const int MaxDistance = g_Config.m_ClDyncam ? g_Config.m_ClDyncamMaxDistance : g_Config.m_ClMouseMaxDistance;
+                        if(MaxDistance > 5 && MaxDistance < 1000) // Don't scale if angle bind or reduces precision
+                                Pos *= 1000.0f / (float)MaxDistance;
+                }
+                m_aInputData[Dummy].m_TargetX = (int)Pos.x;
+                m_aInputData[Dummy].m_TargetY = (int)Pos.y;
 
-		if(g_Config.m_TcScaleMouseDistance && !GameClient()->m_Snap.m_SpecInfo.m_Active)
-		{
-			const int MaxDistance = g_Config.m_ClDyncam ? g_Config.m_ClDyncamMaxDistance : g_Config.m_ClMouseMaxDistance;
-			if(MaxDistance > 5 && MaxDistance < 1000) // Don't scale if angle bind or reduces precision
-				Pos *= 1000.0f / (float)MaxDistance;
-		}
-		m_aInputData[g_Config.m_ClDummy].m_TargetX = (int)Pos.x;
-		m_aInputData[g_Config.m_ClDummy].m_TargetY = (int)Pos.y;
+                if(!m_aInputData[Dummy].m_TargetX && !m_aInputData[Dummy].m_TargetY)
+                        m_aInputData[Dummy].m_TargetX = 1;
 
-		if(!m_aInputData[g_Config.m_ClDummy].m_TargetX && !m_aInputData[g_Config.m_ClDummy].m_TargetY)
-			m_aInputData[g_Config.m_ClDummy].m_TargetX = 1;
+                // send once a second just to be sure
+                Send = Send || time_get() > m_LastSendTime + time_freq();
+        }
+        else
+        {
+                vec2 Pos;
+                if(g_Config.m_ClSubTickAiming && m_aMousePosOnAction[Dummy] != vec2(0.0f, 0.0f))
+                {
+                        Pos = GameClient()->m_Controls.m_aMousePos[Dummy];
+                        m_aMousePosOnAction[Dummy] = vec2(0.0f, 0.0f);
+                }
+                else
+                        Pos = GameClient()->m_Controls.m_aMousePos[Dummy];
 
-		// set direction
-		m_aInputData[g_Config.m_ClDummy].m_Direction = 0;
-		if(m_aInputDirectionLeft[g_Config.m_ClDummy] && !m_aInputDirectionRight[g_Config.m_ClDummy])
-			m_aInputData[g_Config.m_ClDummy].m_Direction = -1;
-		if(!m_aInputDirectionLeft[g_Config.m_ClDummy] && m_aInputDirectionRight[g_Config.m_ClDummy])
-			m_aInputData[g_Config.m_ClDummy].m_Direction = 1;
+                if(g_Config.m_TcScaleMouseDistance && !GameClient()->m_Snap.m_SpecInfo.m_Active)
+                {
+                        const int MaxDistance = g_Config.m_ClDyncam ? g_Config.m_ClDyncamMaxDistance : g_Config.m_ClMouseMaxDistance;
+                        if(MaxDistance > 5 && MaxDistance < 1000) // Don't scale if angle bind or reduces precision
+                                Pos *= 1000.0f / (float)MaxDistance;
+                }
+                m_aInputData[Dummy].m_TargetX = (int)Pos.x;
+                m_aInputData[Dummy].m_TargetY = (int)Pos.y;
 
-		// dummy copy moves
-		if(g_Config.m_ClDummyCopyMoves)
-		{
-			CNetObj_PlayerInput *pDummyInput = &GameClient()->m_DummyInput;
-			pDummyInput->m_Direction = m_aInputData[g_Config.m_ClDummy].m_Direction;
-			pDummyInput->m_Hook = m_aInputData[g_Config.m_ClDummy].m_Hook;
-			pDummyInput->m_Jump = m_aInputData[g_Config.m_ClDummy].m_Jump;
-			pDummyInput->m_PlayerFlags = m_aInputData[g_Config.m_ClDummy].m_PlayerFlags;
-			pDummyInput->m_TargetX = m_aInputData[g_Config.m_ClDummy].m_TargetX;
-			pDummyInput->m_TargetY = m_aInputData[g_Config.m_ClDummy].m_TargetY;
-			pDummyInput->m_WantedWeapon = m_aInputData[g_Config.m_ClDummy].m_WantedWeapon;
+                if(!m_aInputData[Dummy].m_TargetX && !m_aInputData[Dummy].m_TargetY)
+                        m_aInputData[Dummy].m_TargetX = 1;
 
-			if(!g_Config.m_ClDummyControl)
-				pDummyInput->m_Fire += m_aInputData[g_Config.m_ClDummy].m_Fire - m_aLastData[g_Config.m_ClDummy].m_Fire;
+                // set direction
+                m_aInputData[Dummy].m_Direction = 0;
+                if(m_aInputDirectionLeft[Dummy] && !m_aInputDirectionRight[Dummy])
+                        m_aInputData[Dummy].m_Direction = -1;
+                if(!m_aInputDirectionLeft[Dummy] && m_aInputDirectionRight[Dummy])
+                        m_aInputData[Dummy].m_Direction = 1;
 
-			pDummyInput->m_NextWeapon += m_aInputData[g_Config.m_ClDummy].m_NextWeapon - m_aLastData[g_Config.m_ClDummy].m_NextWeapon;
-			pDummyInput->m_PrevWeapon += m_aInputData[g_Config.m_ClDummy].m_PrevWeapon - m_aLastData[g_Config.m_ClDummy].m_PrevWeapon;
+                // dummy copy moves
+                if(g_Config.m_ClDummyCopyMoves)
+                {
+                        CNetObj_PlayerInput *pDummyInput = &GameClient()->m_DummyInput;
+                        pDummyInput->m_Direction = m_aInputData[Dummy].m_Direction;
+                        pDummyInput->m_Hook = m_aInputData[Dummy].m_Hook;
+                        pDummyInput->m_Jump = m_aInputData[Dummy].m_Jump;
+                        pDummyInput->m_PlayerFlags = m_aInputData[Dummy].m_PlayerFlags;
+                        pDummyInput->m_TargetX = m_aInputData[Dummy].m_TargetX;
+                        pDummyInput->m_TargetY = m_aInputData[Dummy].m_TargetY;
+                        pDummyInput->m_WantedWeapon = m_aInputData[Dummy].m_WantedWeapon;
 
-			m_aInputData[!g_Config.m_ClDummy] = *pDummyInput;
-		}
+                        if(!g_Config.m_ClDummyControl)
+                                pDummyInput->m_Fire += m_aInputData[Dummy].m_Fire - m_aLastData[Dummy].m_Fire;
 
-		if(g_Config.m_ClDummyControl)
-		{
-			CNetObj_PlayerInput *pDummyInput = &GameClient()->m_DummyInput;
+                        pDummyInput->m_NextWeapon += m_aInputData[Dummy].m_NextWeapon - m_aLastData[Dummy].m_NextWeapon;
+                        pDummyInput->m_PrevWeapon += m_aInputData[Dummy].m_PrevWeapon - m_aLastData[Dummy].m_PrevWeapon;
+
+                        m_aInputData[!Dummy] = *pDummyInput;
+                }
+
+                if(g_Config.m_ClDummyControl)
+                {
+                        CNetObj_PlayerInput *pDummyInput = &GameClient()->m_DummyInput;
 			pDummyInput->m_Jump = g_Config.m_ClDummyJump;
 
 			if(g_Config.m_ClDummyFire)
@@ -313,8 +436,8 @@ int CControls::SnapInput(int *pData)
 		}
 #endif
 		// check if we need to send input
-		Send = Send || m_aInputData[g_Config.m_ClDummy].m_Direction != m_aLastData[g_Config.m_ClDummy].m_Direction;
-		Send = Send || m_aInputData[g_Config.m_ClDummy].m_Jump != m_aLastData[g_Config.m_ClDummy].m_Jump;
+                Send = Send || m_aInputData[Dummy].m_Direction != m_aLastData[Dummy].m_Direction;
+                Send = Send || m_aInputData[Dummy].m_Jump != m_aLastData[Dummy].m_Jump;
 		Send = Send || m_aInputData[g_Config.m_ClDummy].m_Fire != m_aLastData[g_Config.m_ClDummy].m_Fire;
 		Send = Send || m_aInputData[g_Config.m_ClDummy].m_Hook != m_aLastData[g_Config.m_ClDummy].m_Hook;
 		Send = Send || m_aInputData[g_Config.m_ClDummy].m_WantedWeapon != m_aLastData[g_Config.m_ClDummy].m_WantedWeapon;
