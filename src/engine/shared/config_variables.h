@@ -700,8 +700,6 @@ MACRO_CONFIG_STR(SvConnLoggingServer, sv_conn_logging_server, 128, "", CFGFLAG_S
 
 MACRO_CONFIG_INT(ClUnpredictedShadow, cl_unpredicted_shadow, 0, -1, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show unpredicted shadow tee (0 = off, 1 = on, -1 = don't even show in debug mode)")
 MACRO_CONFIG_INT(ClPredictFreeze, cl_predict_freeze, 1, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Predict freeze tiles (0 = off, 1 = on, 2 = partial (allow a small amount of movement in freeze)")
-MACRO_CONFIG_INT(ClAvoidFreeze, cl_avoid_freeze, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Automatically move away from hooked freeze tiles")
-MACRO_CONFIG_INT(ClAvoidFreezeHold, cl_avoid_freeze_hold, 180, 0, 1000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "How long to continue moving after avoiding a freeze tile (in ms)")
 MACRO_CONFIG_INT(ClHookAssist, cl_hook_assist, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Adjust hook aim towards nearby tees when starting a hook")
 MACRO_CONFIG_INT(ClHookAssistRange, cl_hook_assist_range, 25, 1, 90, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Maximum angle difference in degrees for hook assist to snap")
 MACRO_CONFIG_INT(ClHookAssistMaxDist, cl_hook_assist_max_dist, 450, 50, 1000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Maximum distance in units for hook assist targets")
