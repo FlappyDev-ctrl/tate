@@ -11,10 +11,59 @@
 #include <game/client/components/scoreboard.h>
 #include <game/client/gameclient.h>
 #include <game/collision.h>
+#include <game/mapitems.h>
 
 #include <base/vmath.h>
 
 #include "controls.h"
+
+namespace
+{
+bool IsFreezeTileIndex(int Index)
+{
+        return Index == TILE_FREEZE || Index == TILE_DFREEZE || Index == TILE_LFREEZE;
+}
+
+bool IsFreezeTileAtMapPos(const CCollision *pCollision, int MapX, int MapY)
+{
+        if(!pCollision)
+                return false;
+        if(MapX < 0 || MapY < 0 || MapX >= pCollision->GetWidth() || MapY >= pCollision->GetHeight())
+                return false;
+
+        return IsFreezeTileIndex(pCollision->GetTile(MapX, MapY)) || IsFreezeTileIndex(pCollision->GetFrontTile(MapX, MapY));
+}
+
+bool IsFreezeAtPosition(const CCollision *pCollision, vec2 Pos)
+{
+        const int MapX = round_to_int(Pos.x) / 32;
+        const int MapY = round_to_int(Pos.y) / 32;
+        return IsFreezeTileAtMapPos(pCollision, MapX, MapY);
+}
+
+bool HasFreezeInDirection(const CCollision *pCollision, vec2 BasePos, int Direction)
+{
+        if(Direction == 0 || !pCollision)
+                return false;
+
+        const float PhysicalSize = CCharacterCore::PhysicalSize();
+        const float HalfSize = PhysicalSize / 2.0f;
+        const float HorizontalOffsets[] = {HalfSize + 6.0f, HalfSize + 22.0f};
+        const float VerticalOffsets[] = {-HalfSize * 0.75f, 0.0f, HalfSize * 0.75f};
+
+        for(float Horizontal : HorizontalOffsets)
+        {
+                const vec2 HorizontalPos = BasePos + vec2(Direction * Horizontal, 0.0f);
+                for(float Vertical : VerticalOffsets)
+                {
+                        if(IsFreezeAtPosition(pCollision, HorizontalPos + vec2(0.0f, Vertical)))
+                                return true;
+                }
+        }
+
+        return false;
+}
+} // namespace
 
 CControls::CControls()
 {
@@ -259,12 +308,36 @@ int CControls::SnapInput(int *pData)
 		m_aInputData[g_Config.m_ClDummy].m_Direction = 0;
 		if(m_aInputDirectionLeft[g_Config.m_ClDummy] && !m_aInputDirectionRight[g_Config.m_ClDummy])
 			m_aInputData[g_Config.m_ClDummy].m_Direction = -1;
-		if(!m_aInputDirectionLeft[g_Config.m_ClDummy] && m_aInputDirectionRight[g_Config.m_ClDummy])
-			m_aInputData[g_Config.m_ClDummy].m_Direction = 1;
+                if(!m_aInputDirectionLeft[g_Config.m_ClDummy] && m_aInputDirectionRight[g_Config.m_ClDummy])
+                        m_aInputData[g_Config.m_ClDummy].m_Direction = 1;
 
-		// dummy copy moves
-		if(g_Config.m_ClDummyCopyMoves)
-		{
+                if(g_Config.m_TcAvoidFreeze && GameClient()->m_Snap.m_LocalClientId >= 0 && GameClient()->m_Snap.m_pLocalCharacter)
+                {
+                        const auto &LocalClient = GameClient()->m_aClients[GameClient()->m_Snap.m_LocalClientId];
+                        const bool Frozen = LocalClient.m_Predicted.m_FreezeEnd != 0 || LocalClient.m_Predicted.m_DeepFrozen;
+                        if(!Frozen)
+                        {
+                                const CCollision *pCollision = GameClient()->Collision();
+                                const vec2 BasePos = GameClient()->m_LocalCharacterPos;
+                                if(!IsFreezeAtPosition(pCollision, BasePos))
+                                {
+                                        const int DesiredDir = m_aInputData[g_Config.m_ClDummy].m_Direction;
+                                        if(DesiredDir != 0)
+                                        {
+                                                const bool FreezeAhead = HasFreezeInDirection(pCollision, BasePos, DesiredDir);
+                                                if(FreezeAhead)
+                                                {
+                                                        const bool FreezeBehind = HasFreezeInDirection(pCollision, BasePos, -DesiredDir);
+                                                        m_aInputData[g_Config.m_ClDummy].m_Direction = FreezeBehind ? 0 : -DesiredDir;
+                                                }
+                                        }
+                                }
+                        }
+                }
+
+                // dummy copy moves
+                if(g_Config.m_ClDummyCopyMoves)
+                {
 			CNetObj_PlayerInput *pDummyInput = &GameClient()->m_DummyInput;
 			pDummyInput->m_Direction = m_aInputData[g_Config.m_ClDummy].m_Direction;
 			pDummyInput->m_Hook = m_aInputData[g_Config.m_ClDummy].m_Hook;
