@@ -23,8 +23,6 @@ public:
 
 	int m_aAmmoCount[NUM_WEAPONS];
 
-	int m_aAvoidFreezeTimer[NUM_DUMMIES];
-	int m_aAvoidFreezeDir[NUM_DUMMIES];
 	bool m_aHookAssistLock[NUM_DUMMIES];
 
 	int64_t m_LastSendTime;

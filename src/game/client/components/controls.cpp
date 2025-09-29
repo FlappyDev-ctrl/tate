@@ -22,23 +22,6 @@
 
 namespace
 {
-bool IsFreezeTile(int Tile)
-{
-	return Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE;
-}
-
-bool IsFreezeTileAt(const CCollision *pCollision, const vec2 &Pos)
-{
-	if(!pCollision)
-		return false;
-	const int Index = pCollision->GetPureMapIndex(Pos);
-	if(Index < 0)
-		return false;
-	if(IsFreezeTile(pCollision->GetTileIndex(Index)))
-		return true;
-	return IsFreezeTile(pCollision->GetFrontTileIndex(Index));
-}
-
 float AngleBetween(const vec2 &a, const vec2 &b)
 {
 	const float LengthA = length(a);
@@ -56,8 +39,6 @@ CControls::CControls()
 	mem_zero(m_aMousePos, sizeof(m_aMousePos));
 	mem_zero(m_aMousePosOnAction, sizeof(m_aMousePosOnAction));
 	mem_zero(m_aTargetPos, sizeof(m_aTargetPos));
-	mem_zero(m_aAvoidFreezeTimer, sizeof(m_aAvoidFreezeTimer));
-	mem_zero(m_aAvoidFreezeDir, sizeof(m_aAvoidFreezeDir));
 	mem_zero(m_aHookAssistLock, sizeof(m_aHookAssistLock));
 }
 
@@ -84,8 +65,6 @@ void CControls::ResetInput(int Dummy)
 
 	m_aInputDirectionLeft[Dummy] = 0;
 	m_aInputDirectionRight[Dummy] = 0;
-	m_aAvoidFreezeTimer[Dummy] = 0;
-	m_aAvoidFreezeDir[Dummy] = 0;
 	m_aHookAssistLock[Dummy] = false;
 }
 
@@ -336,55 +315,8 @@ int CControls::SnapInput(int *pData)
 			pDummyInput->m_Hook = g_Config.m_ClDummyHook;
 		}
 
-		const int Dummy = g_Config.m_ClDummy;
-		if(g_Config.m_ClAvoidFreeze && !GameClient()->m_Snap.m_SpecInfo.m_Active)
-		{
-			int &AvoidTimer = m_aAvoidFreezeTimer[Dummy];
-			int &AvoidDir = m_aAvoidFreezeDir[Dummy];
-			const int LocalId = GameClient()->m_Snap.m_LocalClientId;
-			if(LocalId >= 0 && GameClient()->m_aClients[LocalId].m_Active)
-			{
-				const CCharacterCore &LocalCore = GameClient()->m_aClients[LocalId].m_Predicted;
-				const bool HookingFreeze = LocalCore.m_HookState == HOOK_GRABBED && LocalCore.HookedPlayer() == -1 && IsFreezeTileAt(Collision(), LocalCore.m_HookPos);
-				if(HookingFreeze)
-				{
-					vec2 Avoid = LocalCore.m_Pos - LocalCore.m_HookPos;
-					int Dir = 0;
-					if(std::abs(Avoid.x) > 1.0f || std::abs(LocalCore.m_Vel.x) > 1.0f)
-					{
-						if(std::abs(Avoid.x) >= std::abs(Avoid.y) * 0.5f)
-							Dir = Avoid.x > 0.0f ? 1 : -1;
-						else if(std::abs(LocalCore.m_Vel.x) > 1.0f)
-							Dir = LocalCore.m_Vel.x > 0.0f ? 1 : -1;
-					}
-					if(Dir != 0)
-					{
-						AvoidDir = Dir;
-						const int Duration = std::max(1, g_Config.m_ClAvoidFreezeHold * Client()->GameTickSpeed() / 1000);
-						AvoidTimer = std::max(AvoidTimer, Duration);
-					}
-				}
-				if(AvoidTimer > 0 && AvoidDir != 0)
-				{
-					if(m_aInputDirectionLeft[Dummy] == 0 && m_aInputDirectionRight[Dummy] == 0)
-						m_aInputData[Dummy].m_Direction = AvoidDir;
-					if(--AvoidTimer <= 0)
-						AvoidDir = 0;
-				}
-			}
-			else
-			{
-				AvoidTimer = 0;
-				AvoidDir = 0;
-			}
-		}
-		else
-		{
-			m_aAvoidFreezeTimer[Dummy] = 0;
-			m_aAvoidFreezeDir[Dummy] = 0;
-		}
-
-		if(g_Config.m_ClHookAssist && !GameClient()->m_Snap.m_SpecInfo.m_Active)
+                const int Dummy = g_Config.m_ClDummy;
+                if(g_Config.m_ClHookAssist && !GameClient()->m_Snap.m_SpecInfo.m_Active)
 		{
 			const int LocalId = GameClient()->m_Snap.m_LocalClientId;
 			if(LocalId >= 0 && GameClient()->m_aClients[LocalId].m_Active)

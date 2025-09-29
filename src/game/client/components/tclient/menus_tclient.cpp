@@ -508,12 +508,6 @@ void CMenus::RenderSettingsTClientSettngs(CUIRect MainView)
 	Ui()->DoLabel(&Label, TCLocalize("Helpers"), HeadlineFontSize, TEXTALIGN_ML);
 	Column.HSplitTop(MarginSmall, nullptr, &Column);
 
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClAvoidFreeze, TCLocalize("Avoid freeze tiles"), &g_Config.m_ClAvoidFreeze, &Column, LineSize);
-	Column.HSplitTop(LineSize, &Button, &Column);
-	Ui()->DoScrollbarOption(&g_Config.m_ClAvoidFreezeHold, &g_Config.m_ClAvoidFreezeHold, &Button,
-		g_Config.m_ClAvoidFreeze ? TCLocalize("Avoid freeze hold") : TCLocalize("Avoid freeze hold (inactive)"),
-		0, 1000, &CUi::ms_LinearScrollbarScale, 0, "ms");
-
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClHookAssist, TCLocalize("Hook assist"), &g_Config.m_ClHookAssist, &Column, LineSize);
 	Column.HSplitTop(LineSize, &Button, &Column);
 	Ui()->DoScrollbarOption(&g_Config.m_ClHookAssistRange, &g_Config.m_ClHookAssistRange, &Button, TCLocalize("Hook assist angle"), 1, 90, &CUi::ms_LinearScrollbarScale, 0, "°");
